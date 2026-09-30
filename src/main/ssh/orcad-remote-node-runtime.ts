@@ -4,8 +4,8 @@
  * The OpenCode vault reader uses the same store on SSH and WSL hosts (design D4a).
  *
  * The official archive is uploaded as published and extracted on the host; the executable's
- * hash is checked there before it is published. Store-wide GC and the fallback ladder are
- * Phase 2: nothing here deletes a runtime.
+ * hash is checked there before it is published. Promotion runs under the store lock that
+ * store GC also takes (design D5); nothing here deletes a runtime.
  */
 import { randomBytes } from 'node:crypto'
 import { copyFile, link, mkdtemp, rm } from 'node:fs/promises'
@@ -28,12 +28,15 @@ import { isUnconfirmedSshCommandTermination } from './ssh-relay-exec-command'
 import { uploadRelayDirectory } from './ssh-relay-install-transfers'
 import { joinRemotePath, remoteDirname, type RemoteHostPlatform } from './ssh-remote-platform'
 import { assertPosixOrcadHost } from './orcad-remote-host-support'
+import { withRuntimeStoreLock } from './remote-node-runtime-store-lock'
 
 export const REMOTE_NODE_RUNTIME_READY = 'ORCA_NODE_RUNTIME_READY'
 export const REMOTE_NODE_RUNTIME_MISSING = 'ORCA_NODE_RUNTIME_MISSING'
 export const REMOTE_NODE_RUNTIME_SELFTEST_FAILED = 'ORCA_NODE_RUNTIME_SELFTEST_FAILED'
 export const REMOTE_NODE_RUNTIME_EXIT_PREFIX = 'ORCA_RUNTIME_EXIT='
 const VERIFIED_MARKER = '.verified'
+/** Upload stages sit in the store beside the runtimes they become; store GC sweeps stale ones. */
+export const RUNTIME_STORE_STAGE_PREFIX = '.stage-'
 
 /** `<storeParent>/runtimes/node-<executableSha256>`, the one host layout (design D5). */
 export function nodeRuntimeStoreDir(
@@ -108,7 +111,7 @@ export function nodeRuntimeStageDir(
   return joinRemotePath(
     host,
     remoteDirname(runtimeDir, host),
-    `.stage-${basename(runtimeDir)}-${token}`
+    `${RUNTIME_STORE_STAGE_PREFIX}${basename(runtimeDir)}-${token}`
   )
 }
 
@@ -253,9 +256,32 @@ export async function ensureRemoteOrcadNodeRuntime(options: {
     )
     await exec(`mkdir -p ${shellEscape(stageDir)}`, signal)
     await remoteStep(() => uploadRelayDirectory(conn, localStage, stageDir, host, { signal }))
-    const promoted = await exec(
-      promoteRemoteNodeRuntimeCommand(host, { stageDir, archive, runtimeDir, target, token }),
-      signal
+    // Why re-probe under the lock: a sibling installer may have published this pin while we uploaded.
+    const promoted = await remoteStep(() =>
+      withRuntimeStoreLock(
+        conn,
+        host,
+        remoteDirname(runtimeDir, host),
+        async () =>
+          (
+            await execCommand(conn, probeRemoteNodeRuntimeCommand(host, runtimeDir, target), {
+              signal
+            })
+          ).trim() === REMOTE_NODE_RUNTIME_READY
+            ? REMOTE_NODE_RUNTIME_READY
+            : execCommand(
+                conn,
+                promoteRemoteNodeRuntimeCommand(host, {
+                  stageDir,
+                  archive,
+                  runtimeDir,
+                  target,
+                  token
+                }),
+                { signal }
+              ),
+        signal
+      )
     )
     const selfTestFailure = promoted.indexOf(REMOTE_NODE_RUNTIME_SELFTEST_FAILED)
     if (selfTestFailure !== -1) {
