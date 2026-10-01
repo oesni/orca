@@ -15,9 +15,9 @@ for (const mode of ['full', 'compact'] as const) {
         }
         const state = store.getState()
         state.setAgentActivityDisplayMode(mode)
-        if (!state.worktreeCardProperties.includes('inline-agents')) {
-          state.toggleWorktreeCardProperty('inline-agents')
-        }
+        store.setState({
+          worktreeCardProperties: [...new Set([...state.worktreeCardProperties, 'inline-agents'])]
+        })
         while ((store.getState().tabsByWorktree[worktreeId] ?? []).length < 2) {
           store.getState().createTab(worktreeId)
         }
