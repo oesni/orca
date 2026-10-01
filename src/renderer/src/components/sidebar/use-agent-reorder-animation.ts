@@ -36,28 +36,39 @@ export function useAgentReorderAnimation(order: readonly string[]) {
       return
     }
     const elements = Array.from(root.querySelectorAll<HTMLElement>('[data-agent-reorder-key]'))
-    const measure = () =>
-      new Map(
+    const measure = () => {
+      const measuredTops = new Map<HTMLElement, number>()
+      const top = (element: HTMLElement) => {
+        const cached = measuredTops.get(element)
+        if (cached !== undefined) {
+          return cached
+        }
+        const value = element.getBoundingClientRect().top
+        measuredTops.set(element, value)
+        return value
+      }
+      return new Map(
         elements.map((element) => {
           // Each lineage branch moves with its parent; only animate its own sibling displacement.
           const container =
             element.parentElement?.closest<HTMLElement>('[data-agent-reorder-key]') ?? root
-          return [
-            element.dataset.agentReorderKey ?? '',
-            element.getBoundingClientRect().top - container.getBoundingClientRect().top
-          ]
+          return [element.dataset.agentReorderKey ?? '', top(element) - top(container)]
         })
       )
-    const visualTops = animationsRef.current.length > 0 ? measure() : null
+    }
+    const visualTops = animationsRef.current.some((animation) => animation.playState === 'running')
+      ? measure()
+      : null
     // Measure layout, not a transform left over from an interrupted reorder.
     animationsRef.current.forEach((animation) => animation.cancel())
     animationsRef.current = []
     const tops = measure()
     previousRef.current = { root, order, tops }
+    const previousKeys = new Set(previous?.order)
     const reordered =
       previous &&
       previous.order.length === order.length &&
-      order.every((key) => previous.order.includes(key)) &&
+      order.every((key) => previousKeys.has(key)) &&
       order.some((key, index) => key !== previous.order[index])
     if (!reordered) {
       return

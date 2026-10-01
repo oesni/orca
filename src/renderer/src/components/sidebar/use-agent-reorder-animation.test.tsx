@@ -186,3 +186,27 @@ it('refreshes layout snapshots after rows change height without changing order',
     expect.anything()
   )
 })
+
+function LazyList({ expanded, reversed }: { expanded: boolean; reversed: boolean }) {
+  const order = reversed ? ['b', 'a'] : ['a', 'b']
+  const ref = useAgentReorderAnimation(order)
+  return (
+    <div ref={ref}>
+      {expanded &&
+        order.map((key, index) => (
+          <div key={key} data-agent-reorder-key={key} data-top={24 * index}>
+            {key}
+          </div>
+        ))}
+    </div>
+  )
+}
+
+it('measures newly expanded compact rows before their first reorder', () => {
+  const { animate } = setup()
+  const view = render(<LazyList expanded={false} reversed={false} />)
+  view.rerender(<LazyList expanded reversed={false} />)
+  expect(animate).not.toHaveBeenCalled()
+  view.rerender(<LazyList expanded reversed />)
+  expect(animate).toHaveBeenCalledTimes(2)
+})
