@@ -23,7 +23,14 @@ for (const mode of ['full', 'compact'] as const) {
         }
         return (store.getState().tabsByWorktree[worktreeId] ?? []).slice(0, 2).map((tab, index) => {
           const agentType = index === 0 ? 'claude' : 'codex'
-          const paneKey = `${tab.id}:${crypto.randomUUID()}`
+          let leaf = store.getState().terminalLayoutsByTabId[tab.id]?.root
+          while (leaf?.type === 'split') {
+            leaf = leaf.first
+          }
+          if (leaf?.type !== 'leaf') {
+            throw new Error('Missing terminal leaf')
+          }
+          const paneKey = `${tab.id}:${leaf.leafId}`
           state.setTabCustomTitle(tab.id, index === 0 ? 'Claude order proof' : 'Codex order proof')
           state.setAgentStatus(
             paneKey,
@@ -85,7 +92,7 @@ for (const mode of ['full', 'compact'] as const) {
           .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-tab-title')))
       )
       .toEqual(['Codex order proof', 'Claude order proof'])
-    await rows.filter({ hasText: 'claude task' }).click()
+    await rows.filter({ hasText: 'Claude order proof' }).click()
     await expect(first).toHaveAttribute('data-active', 'true')
     await testInfo.attach(`${mode}-after`, {
       body: await orcaPage.screenshot(),
