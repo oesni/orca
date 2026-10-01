@@ -34,7 +34,9 @@ assert(Number.isInteger(samples) && samples > 0 && samples <= 3)
 const variants = (process.env.BENCHMARK_VARIANTS ?? 'baseline,combined').split(',')
 assert(
   variants.length === 2 &&
-    variants.every((name) => ['baseline', 'combined', 'early'].includes(name))
+    variants.every((name) =>
+      ['baseline', 'combined', 'early', 'baseline-types', 'types-plan'].includes(name)
+    )
 )
 const cold = process.env.BENCHMARK_COLD_TYPES === 'true'
 const base = process.env.BASE_SHA
@@ -58,13 +60,15 @@ async function measure(variant, sample) {
   const background = new Map()
   const staticSteps = workflow.jobs.baseline_static.steps
   const steps =
-    variant !== 'baseline'
-      ? workflow.jobs[variant].steps
-      : [
-          ...staticSteps,
-          ...workflow.jobs.baseline_types.steps,
-          ...workflow.jobs.baseline_plan_before.steps
-        ]
+    variant === 'baseline-types'
+      ? [...workflow.jobs.baseline_types.steps, ...workflow.jobs.baseline_plan_before.steps]
+      : variant !== 'baseline'
+        ? workflow.jobs[variant.replaceAll('-', '_')].steps
+        : [
+            ...staticSteps,
+            ...workflow.jobs.baseline_types.steps,
+            ...workflow.jobs.baseline_plan_before.steps
+          ]
   const start = (step) => {
     const name = step.name ?? step.run
     const startMs = performance.now()

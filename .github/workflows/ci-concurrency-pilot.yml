@@ -843,3 +843,44 @@ jobs:
           name: early-compiler-comparison-cold-${{ matrix.cold }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/preflight-comparison
           retention-days: 14
+    if: false
+  controlled_type_plan:
+    name: planning and types cold ${{ matrix.cold }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        cold:
+          - 'false'
+          - 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 50
+          persist-credentials: false
+      - uses: ./.github/actions/install-node-dependencies
+        with:
+          native-runtime: none
+      - name: Cache TypeScript incremental state
+        uses: actions/cache/restore@v5
+        with:
+          path: config/*.tsbuildinfo
+          key: tsbuildinfo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'config/tsconfig*.json') }}-${{ github.event.pull_request.base.sha }}
+          restore-keys: |
+            tsbuildinfo-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'config/tsconfig*.json') }}-
+      - name: Compare on the same runner in both orders
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BENCHMARK_COLD_TYPES: ${{ matrix.cold }}
+          BENCHMARK_SAMPLES: '3'
+          BENCHMARK_VARIANTS: baseline-types,types-plan
+        run: node config/scripts/ci-preflight-benchmark.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: type-planning-comparison-cold-${{ matrix.cold }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/preflight-comparison
+          retention-days: 14
