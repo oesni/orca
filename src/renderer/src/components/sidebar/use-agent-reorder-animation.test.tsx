@@ -16,9 +16,16 @@ function List({ order }: { order: string[] }) {
   )
 }
 
+const originalAnimate = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'animate')
+
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  if (originalAnimate) {
+    Object.defineProperty(HTMLElement.prototype, 'animate', originalAnimate)
+  } else {
+    Reflect.deleteProperty(HTMLElement.prototype, 'animate')
+  }
 })
 
 function setup(reduced = false) {
@@ -38,7 +45,10 @@ function setup(reduced = false) {
     return new DOMRect(0, Number(this.dataset.top ?? 0), 100, 24)
   })
   const cancel = vi.fn()
-  const animate = vi.fn(() => ({ cancel, playState: 'running' }))
+  const animate = vi.fn((_frames: Keyframe[], _options: KeyframeAnimationOptions) => ({
+    cancel,
+    playState: 'running'
+  }))
   Object.defineProperty(HTMLElement.prototype, 'animate', { configurable: true, value: animate })
   return { cancel, animate }
 }
@@ -79,4 +89,54 @@ describe('agent reorder motion', () => {
     next.rerender(<List order={['b']} />)
     expect(HTMLElement.prototype.animate).not.toHaveBeenCalled()
   })
+})
+
+function NestedList({ reversed }: { reversed: boolean }) {
+  const order = reversed ? ['q', 'c', 'p', 'b', 'a'] : ['p', 'a', 'b', 'q', 'c']
+  const ref = useAgentReorderAnimation(order)
+  const branches = reversed ? ['q', 'p'] : ['p', 'q']
+  return (
+    <div ref={ref}>
+      {branches.map((key) => {
+        const top = key === 'p' ? (reversed ? 48 : 0) : reversed ? 0 : 72
+        const children = key === 'q' ? ['c'] : reversed ? ['b', 'a'] : ['a', 'b']
+        return (
+          <div key={key} data-agent-reorder-key={key} data-top={top}>
+            {children.map((child, index) => (
+              <div key={child} data-agent-reorder-key={child} data-top={top + 24 * (index + 1)}>
+                {child}
+              </div>
+            ))}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+it('animates child siblings relative to their parent without duplicating parent motion', () => {
+  const { animate } = setup()
+  const view = render(<NestedList reversed={false} />)
+  view.rerender(<NestedList reversed />)
+  expect(animate.mock.calls.map((call) => call[0])).toEqual([
+    [{ translate: '0 72px' }, { translate: '0 0' }],
+    [{ translate: '0 -48px' }, { translate: '0 0' }],
+    [{ translate: '0 24px' }, { translate: '0 0' }],
+    [{ translate: '0 -24px' }, { translate: '0 0' }]
+  ])
+})
+
+it('does not animate inert collapsed rows', () => {
+  const { animate } = setup()
+  const view = render(
+    <div inert>
+      <List order={['a', 'b']} />
+    </div>
+  )
+  view.rerender(
+    <div inert>
+      <List order={['b', 'a']} />
+    </div>
+  )
+  expect(animate).not.toHaveBeenCalled()
 })

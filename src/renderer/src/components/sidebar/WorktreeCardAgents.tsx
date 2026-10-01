@@ -202,8 +202,8 @@ const WorktreeCardAgentsBody = React.memo(function WorktreeCardAgentsBody({
     [agents]
   )
   const hasLineage = childrenByParentPaneKey.size > 0
-  const rootOrder = useMemo(() => rootAgents.map((agent) => agent.paneKey), [rootAgents])
-  const compactAgentListRootRef = useAgentReorderAnimation(rootOrder)
+  const agentOrder = useMemo(() => agents.map((agent) => agent.paneKey), [agents])
+  const agentListRootRef = useAgentReorderAnimation(agentOrder)
   // Why: keep disclosure state out of local useState so a WorktreeCard remount (virtualizer recycle / sibling toggle) doesn't reset it.
   const {
     collapsedLineageParents,
@@ -221,12 +221,12 @@ const WorktreeCardAgentsBody = React.memo(function WorktreeCardAgentsBody({
       dispatchSuppressScrollAdjustment()
       // Why: defer the reveal scroll to next frame; running it inline forces a sync sidebar layout that janks the opening animation.
       const handle = requestAnimationFrame(() => {
-        revealCompactAgentCard(compactAgentListRootRef.current)
+        revealCompactAgentCard(agentListRootRef.current)
       })
       return () => cancelAnimationFrame(handle)
     }
     return undefined
-  }, [agentActivityDisplayMode, compactRootListExpanded, compactAgentListRootRef])
+  }, [agentActivityDisplayMode, compactRootListExpanded, agentListRootRef])
   const toggleLineageParent = useCallback(
     (paneKey: string) => {
       dispatchSuppressScrollAdjustment()
@@ -260,10 +260,7 @@ const WorktreeCardAgentsBody = React.memo(function WorktreeCardAgentsBody({
     const descendantAncestorPaneKeys = new Set(ancestorPaneKeys)
     descendantAncestorPaneKeys.add(agent.paneKey)
     return (
-      <div
-        key={agent.paneKey}
-        data-agent-reorder-key={ancestorPaneKeys.size === 0 ? agent.paneKey : undefined}
-      >
+      <div key={agent.paneKey} data-agent-reorder-key={agent.paneKey}>
         <DashboardAgentRow
           agent={agent}
           onDismiss={handleDismissAgent}
@@ -324,7 +321,7 @@ const WorktreeCardAgentsBody = React.memo(function WorktreeCardAgentsBody({
       <div
         key={agent.paneKey}
         className="flex flex-col gap-0.5"
-        data-agent-reorder-key={ancestorPaneKeys.size === 0 ? agent.paneKey : undefined}
+        data-agent-reorder-key={agent.paneKey}
       >
         <CompactAgentRow
           agent={agent}
@@ -369,7 +366,7 @@ const WorktreeCardAgentsBody = React.memo(function WorktreeCardAgentsBody({
 
     return (
       <div
-        ref={compactAgentListRootRef}
+        ref={agentListRootRef}
         className={cn('flex flex-col mt-1 gap-0.5', className)}
         onClick={stopBubble}
         onDoubleClick={stopBubble}
@@ -412,7 +409,7 @@ const WorktreeCardAgentsBody = React.memo(function WorktreeCardAgentsBody({
   return (
     // Why: swallow bubbling so gutter clicks don't reach WorktreeCard's activate / edit-meta handlers.
     <div
-      ref={compactAgentListRootRef}
+      ref={agentListRootRef}
       className={cn('flex flex-col mt-1', className)}
       onClick={stopBubble}
       onDoubleClick={stopBubble}

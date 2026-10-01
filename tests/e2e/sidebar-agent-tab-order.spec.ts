@@ -15,9 +15,7 @@ for (const mode of ['full', 'compact'] as const) {
         }
         const state = store.getState()
         state.setAgentActivityDisplayMode(mode)
-        store.setState({
-          worktreeCardProperties: [...new Set([...state.worktreeCardProperties, 'inline-agents'])]
-        })
+        state.setWorktreeCardProperties([...state.worktreeCardProperties, 'inline-agents'])
         while ((store.getState().tabsByWorktree[worktreeId] ?? []).length < 2) {
           store.getState().createTab(worktreeId)
         }
@@ -106,6 +104,7 @@ for (const mode of ['full', 'compact'] as const) {
           .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-tab-title')))
       )
       .toEqual(['Codex order proof', 'Claude order proof'])
+    await expect(first).toHaveAttribute('data-active', 'false')
     await rows.filter({ hasText: 'Claude order proof' }).click()
     await expect(first).toHaveAttribute('data-active', 'true')
     await testInfo.attach(`${mode}-after`, {

@@ -19,22 +19,33 @@ export function useAgentReorderAnimation(order: readonly string[]) {
         order.some((key, index) => key !== previous.order[index]))
     // Status updates must not interrupt a reorder already in flight.
     if (
+      !reducedMotion &&
       !orderChanged &&
       animationsRef.current.some((animation) => animation.playState === 'running')
     ) {
       return
     }
+    if (previous && !orderChanged && !reducedMotion) {
+      return
+    }
     const elements = Array.from(root.querySelectorAll<HTMLElement>('[data-agent-reorder-key]'))
+    const measure = () =>
+      new Map(
+        elements.map((element) => {
+          // Each lineage branch moves with its parent; only animate its own sibling displacement.
+          const container =
+            element.parentElement?.closest<HTMLElement>('[data-agent-reorder-key]') ?? root
+          return [
+            element.dataset.agentReorderKey ?? '',
+            element.getBoundingClientRect().top - container.getBoundingClientRect().top
+          ]
+        })
+      )
+    const visualTops = measure()
     // Measure layout, not a transform left over from an interrupted reorder.
     animationsRef.current.forEach((animation) => animation.cancel())
     animationsRef.current = []
-    const rootTop = root.getBoundingClientRect().top
-    const tops = new Map(
-      elements.map((element) => [
-        element.dataset.agentReorderKey ?? '',
-        element.getBoundingClientRect().top - rootTop
-      ])
-    )
+    const tops = measure()
     previousRef.current = { order, tops }
     const reordered =
       previous &&
@@ -49,7 +60,9 @@ export function useAgentReorderAnimation(order: readonly string[]) {
         continue
       }
       const key = element.dataset.agentReorderKey ?? ''
-      const from = previous.tops.get(key)
+      const oldTop = previous.tops.get(key)
+      const visualOffset = (visualTops.get(key) ?? 0) - (tops.get(key) ?? 0)
+      const from = oldTop === undefined ? undefined : oldTop + visualOffset
       const to = tops.get(key)
       if (from === undefined || to === undefined || Math.abs(from - to) < 0.5) {
         continue
