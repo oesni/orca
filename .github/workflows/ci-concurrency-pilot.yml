@@ -10,7 +10,7 @@ concurrency:
   group: ci-concurrency-pilot-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 env:
-  ORCA_BACKGROUND_LAUNCH: "1"
+  ORCA_BACKGROUND_LAUNCH: '1'
 jobs:
   baseline_static:
     name: baseline-static sample ${{ matrix.sample }}
@@ -99,7 +99,7 @@ jobs:
       - name: Boot orcad and round-trip a terminal
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          ORCA_BACKGROUND_LAUNCH: "1"
+          ORCA_BACKGROUND_LAUNCH: '1'
         run: pnpm run smoke:orcad-terminal
       - name: Verify the generated RPC params catalog
         run: pnpm run verify:rpc-params-catalog
@@ -336,7 +336,7 @@ jobs:
       - name: Boot orcad and round-trip a terminal
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          ORCA_BACKGROUND_LAUNCH: "1"
+          ORCA_BACKGROUND_LAUNCH: '1'
         run: pnpm run smoke:orcad-terminal
       - name: Verify the generated RPC params catalog
         run: pnpm run verify:rpc-params-catalog
@@ -463,7 +463,7 @@ jobs:
       - name: Boot orcad and round-trip a terminal
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          ORCA_BACKGROUND_LAUNCH: "1"
+          ORCA_BACKGROUND_LAUNCH: '1'
         run: pnpm run smoke:orcad-terminal
       - name: Verify the generated RPC params catalog
         run: pnpm run verify:rpc-params-catalog
@@ -495,3 +495,97 @@ jobs:
         run: pnpm check:feature-wall-assets
       - name: Verify macOS entitlements
         run: pnpm verify:macos-entitlements
+  baseline_plan_before:
+    name: baseline-plan-before sample ${{ matrix.sample }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        sample:
+          - 1
+          - 2
+          - 3
+        variant:
+          - baseline-plan-before
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 50
+      - uses: ./.github/actions/install-node-dependencies
+      - name: Plan unit selection
+        id: plan
+        env:
+          ORCA_UNIT_SELECTION_MODE: shadow
+        run: |-
+          node --input-type=module -e "import {readFileSync,writeFileSync} from 'node:fs'; writeFileSync('config/scripts/.ci-unit-plan-before.mjs', readFileSync('config/scripts/ci-unit-plan.mjs','utf8').replace('graph: collectUnitDependencyGraph,','graph: collectUnitDependencyGraph(),'))"
+          node config/scripts/.ci-unit-plan-before.mjs
+          rm config/scripts/.ci-unit-plan-before.mjs
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ci-concurrency-${{ matrix.variant }}-${{ matrix.sample }}-attempt-${{ github.run_attempt }}
+          path: ci-shards/unit-selection.json
+          retention-days: 14
+  native_producer:
+    name: native producer sample ${{ matrix.sample }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        sample:
+          - 1
+          - 2
+          - 3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 50
+      - uses: ./.github/actions/ci-native-cache-proof
+        id: deps
+        with:
+          native-runtime: node
+          node-version: '24'
+      - name: Probe cached native runtime
+        run: node config/scripts/ensure-native-runtime.mjs --check-only
+      - name: Verify native cache provenance
+        env:
+          CACHE_HIT: ${{ steps.deps.outputs.native-cache-hit }}
+        run: test "$CACHE_HIT" != true
+  native_consumer:
+    name: native consumer sample ${{ matrix.sample }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        sample:
+          - 1
+          - 2
+          - 3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 50
+      - uses: ./.github/actions/ci-native-cache-proof
+        id: deps
+        with:
+          native-runtime: node
+          node-version: '24'
+      - name: Probe cached native runtime
+        run: node config/scripts/ensure-native-runtime.mjs --check-only
+      - name: Verify native cache provenance
+        env:
+          CACHE_HIT: ${{ steps.deps.outputs.native-cache-hit }}
+        run: test "$CACHE_HIT" = true
+    needs:
+      - native_producer
