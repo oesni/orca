@@ -7,7 +7,7 @@ for (const mode of ['full', 'compact'] as const) {
     await waitForSessionReady(orcaPage)
     const worktreeId = await waitForActiveWorktree(orcaPage)
     await ensureTerminalVisible(orcaPage)
-    const paneKeys = await orcaPage.evaluate(
+    await orcaPage.evaluate(
       ({ worktreeId, mode }) => {
         const store = window.__store
         if (!store) {
@@ -21,28 +21,42 @@ for (const mode of ['full', 'compact'] as const) {
         while ((store.getState().tabsByWorktree[worktreeId] ?? []).length < 2) {
           store.getState().createTab(worktreeId)
         }
-        return (store.getState().tabsByWorktree[worktreeId] ?? []).slice(0, 2).map((tab, index) => {
-          const agentType = index === 0 ? 'claude' : 'codex'
-          let leaf = store.getState().terminalLayoutsByTabId[tab.id]?.root
-          while (leaf?.type === 'split') {
-            leaf = leaf.first
-          }
-          if (leaf?.type !== 'leaf') {
-            throw new Error('Missing terminal leaf')
-          }
-          const paneKey = `${tab.id}:${leaf.leafId}`
-          state.setTabCustomTitle(tab.id, index === 0 ? 'Claude order proof' : 'Codex order proof')
-          state.setAgentStatus(
-            paneKey,
-            { state: 'working', agentType, prompt: `${agentType} task` },
-            agentType,
-            { updatedAt: Date.now(), stateStartedAt: Date.now() - index * 1000 }
-          )
-          return paneKey
-        })
       },
       { worktreeId, mode }
     )
+    await orcaPage.waitForFunction((worktreeId) => {
+      const state = window.__store?.getState()
+      const tabs = state?.tabsByWorktree[worktreeId] ?? []
+      return (
+        tabs.length >= 2 &&
+        tabs
+          .slice(0, 2)
+          .every((tab) => state?.terminalLayoutsByTabId[tab.id]?.root?.type === 'leaf')
+      )
+    }, worktreeId)
+    const paneKeys = await orcaPage.evaluate((worktreeId) => {
+      const store = window.__store
+      if (!store) {
+        throw new Error('Missing E2E store')
+      }
+      const state = store.getState()
+      return (state.tabsByWorktree[worktreeId] ?? []).slice(0, 2).map((tab, index) => {
+        const agentType = index === 0 ? 'claude' : 'codex'
+        const leaf = state.terminalLayoutsByTabId[tab.id]?.root
+        if (leaf?.type !== 'leaf') {
+          throw new Error('Missing terminal leaf')
+        }
+        const paneKey = `${tab.id}:${leaf.leafId}`
+        state.setTabCustomTitle(tab.id, index === 0 ? 'Claude order proof' : 'Codex order proof')
+        state.setAgentStatus(
+          paneKey,
+          { state: 'working', agentType, prompt: `${agentType} task` },
+          agentType,
+          { updatedAt: Date.now(), stateStartedAt: Date.now() - index * 1000 }
+        )
+        return paneKey
+      })
+    }, worktreeId)
 
     const card = worktreeRow(orcaPage, worktreeId)
     if (mode === 'compact') {
