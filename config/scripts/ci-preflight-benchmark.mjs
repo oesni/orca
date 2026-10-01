@@ -31,6 +31,11 @@ for (const file of globSync('config/*.tsbuildinfo')) {
 const results = []
 const samples = Number(process.env.BENCHMARK_SAMPLES ?? 2)
 assert(Number.isInteger(samples) && samples > 0 && samples <= 3)
+const variants = (process.env.BENCHMARK_VARIANTS ?? 'baseline,combined').split(',')
+assert(
+  variants.length === 2 &&
+    variants.every((name) => ['baseline', 'combined', 'early'].includes(name))
+)
 const cold = process.env.BENCHMARK_COLD_TYPES === 'true'
 const base = process.env.BASE_SHA
 assert(/^[a-f0-9]{40}$/.test(base), 'A full PR base SHA is required')
@@ -53,8 +58,8 @@ async function measure(variant, sample) {
   const background = new Map()
   const staticSteps = workflow.jobs.baseline_static.steps
   const steps =
-    variant === 'combined'
-      ? workflow.jobs.combined.steps
+    variant !== 'baseline'
+      ? workflow.jobs[variant].steps
       : [
           ...staticSteps,
           ...workflow.jobs.baseline_types.steps,
@@ -134,7 +139,7 @@ async function measure(variant, sample) {
 }
 
 for (let sample = 1; sample <= samples; sample++) {
-  for (const variant of sample % 2 ? ['baseline', 'combined'] : ['combined', 'baseline']) {
+  for (const variant of sample % 2 ? variants : variants.toReversed()) {
     await measure(variant, sample)
   }
 }
