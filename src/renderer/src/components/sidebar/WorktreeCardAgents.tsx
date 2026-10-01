@@ -28,6 +28,8 @@ import { useWorktreeAgentExpansionState } from './worktree-card-agents-expansion
 import { translate } from '@/i18n/i18n'
 import { activateStructuredAgentSessionTab } from '@/lib/structured-agent-session-tab-activation'
 import { selectAcknowledgedAgentTimes } from './worktree-card-agent-ack-inputs'
+import { useWorktreeAgentVisualOrder } from './use-worktree-agent-visual-order'
+import { useAgentReorderAnimation } from './use-agent-reorder-animation'
 
 export const SUPPRESS_WORKTREE_LIST_SCROLL_ADJUSTMENT_EVENT =
   'orca-suppress-worktree-list-scroll-adjustment'
@@ -75,9 +77,10 @@ type BodyProps = {
 
 const WorktreeCardAgentsBody = React.memo(function WorktreeCardAgentsBody({
   worktreeId,
-  agents,
+  agents: sourceAgents,
   className
 }: BodyProps) {
+  const agents = useWorktreeAgentVisualOrder(worktreeId, sourceAgents)
   const agentActivityDisplayMode =
     useAppStore((s) => s.agentActivityDisplayMode) ?? DEFAULT_AGENT_ACTIVITY_DISPLAY_MODE
   const dropAgentStatus = useAppStore((s) => s.dropAgentStatus)
@@ -89,7 +92,6 @@ const WorktreeCardAgentsBody = React.memo(function WorktreeCardAgentsBody({
   const sendTargetInputs = useAppStore(useShallow((s) => selectSendTargetInputs(s, worktreeId)))
   const sendPromptToSidebarAgentTarget = useAppStore((s) => s.sendPromptToSidebarAgentTarget)
   const focusedAgentPaneKey = useFocusedAgentPaneKey(worktreeId)
-  const compactAgentListRootRef = useRef<HTMLDivElement | null>(null)
 
   // Why: acknowledgement writes are app-global; project only this card's rows
   // so unrelated worktree activity does not rerender every agent body.
@@ -200,6 +202,8 @@ const WorktreeCardAgentsBody = React.memo(function WorktreeCardAgentsBody({
     [agents]
   )
   const hasLineage = childrenByParentPaneKey.size > 0
+  const rootOrder = useMemo(() => rootAgents.map((agent) => agent.paneKey), [rootAgents])
+  const compactAgentListRootRef = useAgentReorderAnimation(rootOrder)
   // Why: keep disclosure state out of local useState so a WorktreeCard remount (virtualizer recycle / sibling toggle) doesn't reset it.
   const {
     collapsedLineageParents,
@@ -222,7 +226,7 @@ const WorktreeCardAgentsBody = React.memo(function WorktreeCardAgentsBody({
       return () => cancelAnimationFrame(handle)
     }
     return undefined
-  }, [agentActivityDisplayMode, compactRootListExpanded])
+  }, [agentActivityDisplayMode, compactRootListExpanded, compactAgentListRootRef])
   const toggleLineageParent = useCallback(
     (paneKey: string) => {
       dispatchSuppressScrollAdjustment()
@@ -256,7 +260,10 @@ const WorktreeCardAgentsBody = React.memo(function WorktreeCardAgentsBody({
     const descendantAncestorPaneKeys = new Set(ancestorPaneKeys)
     descendantAncestorPaneKeys.add(agent.paneKey)
     return (
-      <React.Fragment key={agent.paneKey}>
+      <div
+        key={agent.paneKey}
+        data-agent-reorder-key={ancestorPaneKeys.size === 0 ? agent.paneKey : undefined}
+      >
         <DashboardAgentRow
           agent={agent}
           onDismiss={handleDismissAgent}
@@ -290,7 +297,7 @@ const WorktreeCardAgentsBody = React.memo(function WorktreeCardAgentsBody({
             )}
           </div>
         ) : null}
-      </React.Fragment>
+      </div>
     )
   }
 
@@ -314,7 +321,11 @@ const WorktreeCardAgentsBody = React.memo(function WorktreeCardAgentsBody({
     const descendantAncestorPaneKeys = new Set(ancestorPaneKeys)
     descendantAncestorPaneKeys.add(agent.paneKey)
     return (
-      <React.Fragment key={agent.paneKey}>
+      <div
+        key={agent.paneKey}
+        className="flex flex-col gap-0.5"
+        data-agent-reorder-key={ancestorPaneKeys.size === 0 ? agent.paneKey : undefined}
+      >
         <CompactAgentRow
           agent={agent}
           now={now}
@@ -346,7 +357,7 @@ const WorktreeCardAgentsBody = React.memo(function WorktreeCardAgentsBody({
             </div>
           </CompactAgentExpansion>
         ) : null}
-      </React.Fragment>
+      </div>
     )
   }
 
@@ -401,6 +412,7 @@ const WorktreeCardAgentsBody = React.memo(function WorktreeCardAgentsBody({
   return (
     // Why: swallow bubbling so gutter clicks don't reach WorktreeCard's activate / edit-meta handlers.
     <div
+      ref={compactAgentListRootRef}
       className={cn('flex flex-col mt-1', className)}
       onClick={stopBubble}
       onDoubleClick={stopBubble}
