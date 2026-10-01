@@ -3,7 +3,11 @@ import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion'
 
 export function useAgentReorderAnimation(order: readonly string[]) {
   const rootRef = useRef<HTMLDivElement | null>(null)
-  const previousRef = useRef<{ order: readonly string[]; tops: Map<string, number> } | null>(null)
+  const previousRef = useRef<{
+    root: HTMLDivElement
+    order: readonly string[]
+    tops: Map<string, number>
+  } | null>(null)
   const animationsRef = useRef<Animation[]>([])
   const reducedMotion = usePrefersReducedMotion()
 
@@ -12,20 +16,23 @@ export function useAgentReorderAnimation(order: readonly string[]) {
     if (!root) {
       return
     }
-    const previous = previousRef.current
+    if (reducedMotion) {
+      animationsRef.current.forEach((animation) => animation.cancel())
+      animationsRef.current = []
+      previousRef.current = null
+      return
+    }
+    const previous = previousRef.current?.root === root ? previousRef.current : null
     const orderChanged =
       previous &&
       (previous.order.length !== order.length ||
         order.some((key, index) => key !== previous.order[index]))
     // Status updates must not interrupt a reorder already in flight.
     if (
-      !reducedMotion &&
+      previous &&
       !orderChanged &&
       animationsRef.current.some((animation) => animation.playState === 'running')
     ) {
-      return
-    }
-    if (previous && !orderChanged && !reducedMotion) {
       return
     }
     const elements = Array.from(root.querySelectorAll<HTMLElement>('[data-agent-reorder-key]'))
@@ -41,18 +48,18 @@ export function useAgentReorderAnimation(order: readonly string[]) {
           ]
         })
       )
-    const visualTops = measure()
+    const visualTops = animationsRef.current.length > 0 ? measure() : null
     // Measure layout, not a transform left over from an interrupted reorder.
     animationsRef.current.forEach((animation) => animation.cancel())
     animationsRef.current = []
     const tops = measure()
-    previousRef.current = { order, tops }
+    previousRef.current = { root, order, tops }
     const reordered =
       previous &&
       previous.order.length === order.length &&
-      order.every((key) => previous.tops.has(key)) &&
+      order.every((key) => previous.order.includes(key)) &&
       order.some((key, index) => key !== previous.order[index])
-    if (!reordered || reducedMotion) {
+    if (!reordered) {
       return
     }
     for (const element of elements) {
@@ -61,7 +68,7 @@ export function useAgentReorderAnimation(order: readonly string[]) {
       }
       const key = element.dataset.agentReorderKey ?? ''
       const oldTop = previous.tops.get(key)
-      const visualOffset = (visualTops.get(key) ?? 0) - (tops.get(key) ?? 0)
+      const visualOffset = visualTops ? (visualTops.get(key) ?? 0) - (tops.get(key) ?? 0) : 0
       const from = oldTop === undefined ? undefined : oldTop + visualOffset
       const to = tops.get(key)
       if (from === undefined || to === undefined || Math.abs(from - to) < 0.5) {

@@ -140,3 +140,49 @@ it('does not animate inert collapsed rows', () => {
   )
   expect(animate).not.toHaveBeenCalled()
 })
+
+function PartlyHiddenList({ reversed }: { reversed: boolean }) {
+  const ref = useAgentReorderAnimation(reversed ? ['b', 'a', 'hidden'] : ['a', 'hidden', 'b'])
+  return (
+    <div ref={ref}>
+      {(reversed ? ['b', 'a'] : ['a', 'b']).map((key, index) => (
+        <div key={key} data-agent-reorder-key={key} data-top={24 * index}>
+          {key}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+it('animates visible rows while a lineage descendant is unmounted', () => {
+  const { animate } = setup()
+  const view = render(<PartlyHiddenList reversed={false} />)
+  view.rerender(<PartlyHiddenList reversed />)
+  expect(animate).toHaveBeenCalledTimes(2)
+})
+
+function VariableHeightList({ reversed, height }: { reversed: boolean; height: number }) {
+  const order = reversed ? ['b', 'a'] : ['a', 'b']
+  const ref = useAgentReorderAnimation(order)
+  return (
+    <div ref={ref}>
+      {order.map((key, index) => (
+        <div key={key} data-agent-reorder-key={key} data-top={index * height}>
+          {key}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+it('refreshes layout snapshots after rows change height without changing order', () => {
+  const { animate } = setup()
+  const view = render(<VariableHeightList reversed={false} height={24} />)
+  view.rerender(<VariableHeightList reversed={false} height={48} />)
+  view.rerender(<VariableHeightList reversed height={48} />)
+  expect(animate).toHaveBeenNthCalledWith(
+    1,
+    [{ translate: '0 48px' }, { translate: '0 0' }],
+    expect.anything()
+  )
+})
