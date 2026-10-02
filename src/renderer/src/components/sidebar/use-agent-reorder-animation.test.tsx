@@ -21,6 +21,7 @@ const originalAnimate = Object.getOwnPropertyDescriptor(HTMLElement.prototype, '
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
   if (originalAnimate) {
     Object.defineProperty(HTMLElement.prototype, 'animate', originalAnimate)
   } else {
@@ -39,18 +40,45 @@ function setup(reduced = false) {
     removeEventListener: vi.fn(),
     dispatchEvent: vi.fn()
   })
-  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
-    this: HTMLElement
-  ) {
-    return new DOMRect(0, Number(this.dataset.top ?? 0), 100, 24)
-  })
+  const resizeCallbacks: (() => void)[] = []
+  const disconnect = vi.fn()
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      constructor(callback: () => void) {
+        resizeCallbacks.push(callback)
+      }
+      observe() {}
+      disconnect = disconnect
+    }
+  )
+  const resize = () => resizeCallbacks.at(-1)?.()
+  const offsets = new Map<HTMLElement, number>()
+  const measure = vi
+    .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+    .mockImplementation(function (this: HTMLElement) {
+      let offset = offsets.get(this) ?? 0
+      for (let node: HTMLElement | null = this.parentElement; node; node = node.parentElement) {
+        offset += offsets.get(node) ?? 0
+      }
+      return new DOMRect(0, Number(this.dataset.top ?? 0) + offset, 100, 24)
+    })
   const cancel = vi.fn()
-  const animate = vi.fn((_frames: Keyframe[], _options: KeyframeAnimationOptions) => ({
-    cancel,
-    playState: 'running'
-  }))
+  const animate = vi.fn(function (
+    this: HTMLElement,
+    _frames: Keyframe[],
+    _options: KeyframeAnimationOptions
+  ) {
+    return {
+      cancel: () => {
+        cancel()
+        offsets.delete(this)
+      },
+      playState: 'running'
+    }
+  })
   Object.defineProperty(HTMLElement.prototype, 'animate', { configurable: true, value: animate })
-  return { cancel, animate }
+  return { cancel, animate, offsets, measure, resize, disconnect }
 }
 
 describe('agent reorder motion', () => {
@@ -78,10 +106,11 @@ describe('agent reorder motion', () => {
   })
 
   it('respects reduced motion and does not animate initial, added or removed rows', () => {
-    const { animate } = setup(true)
+    const { animate, measure } = setup(true)
     const view = render(<List order={['a', 'b']} />)
     view.rerender(<List order={['b', 'a']} />)
     expect(animate).not.toHaveBeenCalled()
+    expect(measure).not.toHaveBeenCalled()
     view.unmount()
     setup()
     const next = render(<List order={['a']} />)
@@ -126,8 +155,8 @@ it('animates child siblings relative to their parent without duplicating parent 
   ])
 })
 
-it('does not animate inert collapsed rows', () => {
-  const { animate } = setup()
+it('does not measure or animate inert collapsed rows', () => {
+  const { animate, measure } = setup()
   const view = render(
     <div inert>
       <List order={['a', 'b']} />
@@ -139,6 +168,7 @@ it('does not animate inert collapsed rows', () => {
     </div>
   )
   expect(animate).not.toHaveBeenCalled()
+  expect(measure).not.toHaveBeenCalled()
 })
 
 function PartlyHiddenList({ reversed }: { reversed: boolean }) {
@@ -176,9 +206,10 @@ function VariableHeightList({ reversed, height }: { reversed: boolean; height: n
 }
 
 it('refreshes layout snapshots after rows change height without changing order', () => {
-  const { animate } = setup()
+  const { animate, resize } = setup()
   const view = render(<VariableHeightList reversed={false} height={24} />)
   view.rerender(<VariableHeightList reversed={false} height={48} />)
+  resize()
   view.rerender(<VariableHeightList reversed height={48} />)
   expect(animate).toHaveBeenNthCalledWith(
     1,
@@ -209,4 +240,35 @@ it('measures newly expanded compact rows before their first reorder', () => {
   expect(animate).not.toHaveBeenCalled()
   view.rerender(<LazyList expanded reversed />)
   expect(animate).toHaveBeenCalledTimes(2)
+})
+
+it('continues interrupted motion from the position visible before the second commit', () => {
+  const { animate, offsets } = setup()
+  const view = render(<List order={['a', 'b', 'c']} />)
+  view.rerender(<List order={['b', 'a', 'c']} />)
+  const a = view.container.querySelector<HTMLElement>('[data-agent-reorder-key="a"]')!
+  const b = view.container.querySelector<HTMLElement>('[data-agent-reorder-key="b"]')!
+  offsets.set(a, -12)
+  offsets.set(b, 12)
+  const visibleBefore = a.getBoundingClientRect().top
+  expect(visibleBefore).toBe(12)
+  animate.mockClear()
+  view.rerender(<List order={['b', 'c', 'a']} />)
+  // The new DOM layout is 48; continuing from 12 requires a -36 translation.
+  expect(animate.mock.calls.map((call) => call[0])).toEqual([
+    [{ translate: '0 12px' }, { translate: '0 0' }],
+    [{ translate: '0 24px' }, { translate: '0 0' }],
+    [{ translate: '0 -36px' }, { translate: '0 0' }]
+  ])
+})
+
+it('skips geometry reads on status-only renders and disconnects its size observer', () => {
+  const { measure, disconnect } = setup()
+  const view = render(<List order={['a', 'b']} />)
+  measure.mockClear()
+  view.rerender(<List order={['a', 'b']} />)
+  view.rerender(<List order={['a', 'b']} />)
+  expect(measure).not.toHaveBeenCalled()
+  view.unmount()
+  expect(disconnect).toHaveBeenCalledOnce()
 })

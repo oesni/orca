@@ -38,8 +38,8 @@ export function orderAgentsByVisibleTabs<T extends AgentTabRow>(
       if (ref.type === 'terminal') {
         add(ref.id)
       }
-      if (ref.type === 'agent-session') {
-        add(ref.tabId ?? ref.id)
+      if (ref.type === 'agent-session' && ref.tabId !== undefined) {
+        add(ref.tabId)
       }
     }
   }

@@ -88,6 +88,18 @@ describe('sidebar visual agent order', () => {
     ).toEqual(['codex', 'claude'])
   })
 
+  it('ranks a declared structured session by unified tab id rather than its entity id', () => {
+    expect(
+      orderAgentsByVisibleTabs(
+        rows,
+        [tab('claude', 'g', 'session', 'agent-session'), tab('codex')],
+        [group('g', ['claude', 'codex'])],
+        undefined,
+        []
+      )
+    ).toEqual(rows)
+  })
+
   it('keeps retained/unplaced rows and uses legacy order before groups hydrate', () => {
     const all = [...rows, { tab: { id: 'retained' } }]
     expect(orderAgentsByVisibleTabs(all, [], [], undefined, ['codex', 'claude'])).toEqual([

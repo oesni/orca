@@ -104,6 +104,64 @@ for (const mode of ['full', 'compact'] as const) {
           .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-tab-title')))
       )
       .toEqual(['Codex order proof', 'Claude order proof'])
+    const interruption = await rows.evaluateAll(async (nodes) => {
+      const store = window.__store
+      if (!store) {
+        throw new Error('Missing E2E store')
+      }
+      const state = store.getState()
+      const group = Object.values(state.groupsByWorktree)
+        .flat()
+        .find((candidate) =>
+          candidate.tabOrder.some((id) =>
+            state.unifiedTabsByWorktree[candidate.worktreeId]?.some(
+              (tab) => tab.id === id && tab.customLabel === 'Claude order proof'
+            )
+          )
+        )
+      if (!group) {
+        throw new Error('Missing proof tab group')
+      }
+      const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+      nodes.forEach((node) => node.getAnimations().forEach((animation) => animation.finish()))
+      store.getState().reorderUnifiedTabs(group.id, group.tabOrder.toReversed())
+      for (let i = 0; i < 10 && !nodes.some((node) => node.getAnimations().length); i++) {
+        await frame()
+      }
+      const initial = nodes.flatMap((node) => node.getAnimations())
+      if (initial.length !== nodes.length) {
+        throw new Error('Expected a running reorder animation on each row')
+      }
+      initial.forEach((animation) => {
+        animation.pause()
+        animation.currentTime = 90
+        // Keep playState running while preserving a deterministic halfway sample.
+        animation.playbackRate = 0
+        animation.play()
+      })
+      const before = nodes.map((node) => node.getBoundingClientRect().top)
+      store.getState().reorderUnifiedTabs(group.id, group.tabOrder)
+      for (let i = 0; i < 10 && initial.some((animation) => animation.playState !== 'idle'); i++) {
+        await frame()
+      }
+      const next = nodes.flatMap((node) => node.getAnimations())
+      if (
+        next.length !== nodes.length ||
+        initial.some((animation) => animation.playState !== 'idle')
+      ) {
+        throw new Error('Expected replacement animations after interrupting the reorder')
+      }
+      next.forEach((animation) => {
+        animation.pause()
+        animation.currentTime = 0
+      })
+      const after = nodes.map((node) => node.getBoundingClientRect().top)
+      next.forEach((animation) => animation.finish())
+      return { before, after }
+    })
+    interruption.before.forEach((top, index) => {
+      expect(Math.abs(top - interruption.after[index])).toBeLessThan(0.5)
+    })
     await expect(first).toHaveAttribute('data-active', 'false')
     await rows.filter({ hasText: 'Claude order proof' }).click()
     await expect(first).toHaveAttribute('data-active', 'true')

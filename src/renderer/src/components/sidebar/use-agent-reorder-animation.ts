@@ -1,6 +1,13 @@
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion'
 
+function observeRowSizes(root: HTMLElement, elements: HTMLElement[], refresh: () => void) {
+  const observer = new ResizeObserver(refresh)
+  observer.observe(root)
+  elements.forEach((element) => observer.observe(element))
+  return observer
+}
+
 export function useAgentReorderAnimation(order: readonly string[]) {
   const rootRef = useRef<HTMLDivElement | null>(null)
   const previousRef = useRef<{
@@ -9,14 +16,22 @@ export function useAgentReorderAnimation(order: readonly string[]) {
     tops: Map<string, number>
   } | null>(null)
   const animationsRef = useRef<Animation[]>([])
+  const observedRef = useRef<{ elements: HTMLElement[]; observer: ResizeObserver } | null>(null)
   const reducedMotion = usePrefersReducedMotion()
 
   useLayoutEffect(() => {
     const root = rootRef.current
     if (!root) {
+      animationsRef.current.forEach((animation) => animation.cancel())
+      animationsRef.current = []
+      observedRef.current?.observer.disconnect()
+      observedRef.current = null
+      previousRef.current = null
       return
     }
     if (reducedMotion) {
+      observedRef.current?.observer.disconnect()
+      observedRef.current = null
       animationsRef.current.forEach((animation) => animation.cancel())
       animationsRef.current = []
       previousRef.current = null
@@ -27,15 +42,14 @@ export function useAgentReorderAnimation(order: readonly string[]) {
       previous &&
       (previous.order.length !== order.length ||
         order.some((key, index) => key !== previous.order[index]))
-    // Status updates must not interrupt a reorder already in flight.
-    if (
-      previous &&
-      !orderChanged &&
-      animationsRef.current.some((animation) => animation.playState === 'running')
-    ) {
-      return
-    }
-    const elements = Array.from(root.querySelectorAll<HTMLElement>('[data-agent-reorder-key]'))
+    const elements = Array.from(
+      root.querySelectorAll<HTMLElement>('[data-agent-reorder-key]')
+    ).filter((element) => !element.closest('[inert]'))
+    const observed = observedRef.current
+    const elementsChanged =
+      !observed ||
+      observed.elements.length !== elements.length ||
+      elements.some((element, index) => element !== observed.elements[index])
     const measure = () => {
       const measuredTops = new Map<HTMLElement, number>()
       const top = (element: HTMLElement) => {
@@ -56,6 +70,26 @@ export function useAgentReorderAnimation(order: readonly string[]) {
         })
       )
     }
+    const refresh = () => {
+      if (animationsRef.current.some((animation) => animation.playState === 'running')) {
+        return
+      }
+      const snapshot = previousRef.current
+      if (snapshot?.root === root) {
+        snapshot.tops = measure()
+      }
+    }
+    if (elementsChanged || previous?.root !== root) {
+      observed?.observer.disconnect()
+      if (typeof ResizeObserver !== 'undefined') {
+        const observer = observeRowSizes(root, elements, refresh)
+        observedRef.current = { elements, observer }
+      }
+    }
+    // Resize notifications refresh heights; status-only renders need no layout reads.
+    if (previous && !orderChanged && !elementsChanged && observedRef.current) {
+      return
+    }
     const visualTops = animationsRef.current.some((animation) => animation.playState === 'running')
       ? measure()
       : null
@@ -74,11 +108,9 @@ export function useAgentReorderAnimation(order: readonly string[]) {
       return
     }
     for (const element of elements) {
-      if (element.closest('[inert]')) {
-        continue
-      }
       const key = element.dataset.agentReorderKey ?? ''
       const oldTop = previous.tops.get(key)
+      // The DOM has already moved; apply the remaining transform to the prior layout.
       const visualOffset = visualTops ? (visualTops.get(key) ?? 0) - (tops.get(key) ?? 0) : 0
       const from = oldTop === undefined ? undefined : oldTop + visualOffset
       const to = tops.get(key)
@@ -88,15 +120,21 @@ export function useAgentReorderAnimation(order: readonly string[]) {
       if (typeof element.animate !== 'function') {
         continue
       }
-      animationsRef.current.push(
-        element.animate([{ translate: `0 ${from - to}px` }, { translate: '0 0' }], {
-          duration: 180,
-          easing: 'cubic-bezier(0.16, 1, 0.3, 1)'
-        })
-      )
+      const animation = element.animate([{ translate: `0 ${from - to}px` }, { translate: '0 0' }], {
+        duration: 180,
+        easing: 'cubic-bezier(0.16, 1, 0.3, 1)'
+      })
+      animation.onfinish = refresh
+      animationsRef.current.push(animation)
     }
   })
 
-  useEffect(() => () => animationsRef.current.forEach((animation) => animation.cancel()), [])
+  useEffect(
+    () => () => {
+      observedRef.current?.observer.disconnect()
+      animationsRef.current.forEach((animation) => animation.cancel())
+    },
+    []
+  )
   return rootRef
 }
