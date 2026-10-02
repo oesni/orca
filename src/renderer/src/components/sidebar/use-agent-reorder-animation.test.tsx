@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { StrictMode } from 'react'
 import { render, cleanup } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useAgentReorderAnimation } from './use-agent-reorder-animation'
@@ -40,19 +41,25 @@ function setup(reduced = false) {
     removeEventListener: vi.fn(),
     dispatchEvent: vi.fn()
   })
-  const resizeCallbacks: (() => void)[] = []
+  const observers: { callback: () => void; connected: boolean }[] = []
   const disconnect = vi.fn()
   vi.stubGlobal(
     'ResizeObserver',
     class {
+      entry: { callback: () => void; connected: boolean }
       constructor(callback: () => void) {
-        resizeCallbacks.push(callback)
+        this.entry = { callback, connected: true }
+        observers.push(this.entry)
       }
       observe() {}
-      disconnect = disconnect
+      disconnect() {
+        disconnect()
+        this.entry.connected = false
+      }
     }
   )
-  const resize = () => resizeCallbacks.at(-1)?.()
+  const resize = () =>
+    observers.filter((observer) => observer.connected).forEach((observer) => observer.callback())
   const offsets = new Map<HTMLElement, number>()
   const measure = vi
     .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
@@ -78,7 +85,7 @@ function setup(reduced = false) {
     }
   })
   Object.defineProperty(HTMLElement.prototype, 'animate', { configurable: true, value: animate })
-  return { cancel, animate, offsets, measure, resize, disconnect }
+  return { cancel, animate, offsets, measure, resize, disconnect, observers }
 }
 
 describe('agent reorder motion', () => {
@@ -271,4 +278,44 @@ it('skips geometry reads on status-only renders and disconnects its size observe
   expect(measure).not.toHaveBeenCalled()
   view.unmount()
   expect(disconnect).toHaveBeenCalledOnce()
+})
+
+it('reconnects size observation after StrictMode effect replay and tracks changed heights', () => {
+  const { animate, resize, observers } = setup()
+  const view = render(
+    <StrictMode>
+      <VariableHeightList reversed={false} height={24} />
+    </StrictMode>
+  )
+  expect(observers.filter((observer) => observer.connected)).toHaveLength(1)
+  view.rerender(
+    <StrictMode>
+      <VariableHeightList reversed={false} height={48} />
+    </StrictMode>
+  )
+  resize()
+  view.rerender(
+    <StrictMode>
+      <VariableHeightList reversed height={48} />
+    </StrictMode>
+  )
+  expect(animate).toHaveBeenNthCalledWith(
+    1,
+    [{ translate: '0 48px' }, { translate: '0 0' }],
+    expect.anything()
+  )
+  view.unmount()
+  expect(observers.filter((observer) => observer.connected)).toHaveLength(0)
+})
+
+it('preserves in-flight motion on status updates without ResizeObserver', () => {
+  const { animate, cancel, measure } = setup()
+  vi.stubGlobal('ResizeObserver', undefined)
+  const view = render(<List order={['a', 'b']} />)
+  view.rerender(<List order={['b', 'a']} />)
+  measure.mockClear()
+  view.rerender(<List order={['b', 'a']} />)
+  expect(cancel).not.toHaveBeenCalled()
+  expect(measure).not.toHaveBeenCalled()
+  expect(animate).toHaveBeenCalledTimes(2)
 })

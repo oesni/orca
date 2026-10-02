@@ -16,7 +16,9 @@ export function useAgentReorderAnimation(order: readonly string[]) {
     tops: Map<string, number>
   } | null>(null)
   const animationsRef = useRef<Animation[]>([])
-  const observedRef = useRef<{ elements: HTMLElement[]; observer: ResizeObserver } | null>(null)
+  const observedRef = useRef<{ elements: HTMLElement[]; observer: ResizeObserver | null } | null>(
+    null
+  )
   const reducedMotion = usePrefersReducedMotion()
 
   useLayoutEffect(() => {
@@ -24,13 +26,13 @@ export function useAgentReorderAnimation(order: readonly string[]) {
     if (!root) {
       animationsRef.current.forEach((animation) => animation.cancel())
       animationsRef.current = []
-      observedRef.current?.observer.disconnect()
+      observedRef.current?.observer?.disconnect()
       observedRef.current = null
       previousRef.current = null
       return
     }
     if (reducedMotion) {
-      observedRef.current?.observer.disconnect()
+      observedRef.current?.observer?.disconnect()
       observedRef.current = null
       animationsRef.current.forEach((animation) => animation.cancel())
       animationsRef.current = []
@@ -80,14 +82,19 @@ export function useAgentReorderAnimation(order: readonly string[]) {
       }
     }
     if (elementsChanged || previous?.root !== root) {
-      observed?.observer.disconnect()
-      if (typeof ResizeObserver !== 'undefined') {
-        const observer = observeRowSizes(root, elements, refresh)
-        observedRef.current = { elements, observer }
-      }
+      observed?.observer?.disconnect()
+      const observer =
+        typeof ResizeObserver === 'undefined' ? null : observeRowSizes(root, elements, refresh)
+      observedRef.current = { elements, observer }
     }
     // Resize notifications refresh heights; status-only renders need no layout reads.
-    if (previous && !orderChanged && !elementsChanged && observedRef.current) {
+    if (
+      previous &&
+      !orderChanged &&
+      !elementsChanged &&
+      (observedRef.current?.observer ||
+        animationsRef.current.some((animation) => animation.playState === 'running'))
+    ) {
       return
     }
     const visualTops = animationsRef.current.some((animation) => animation.playState === 'running')
@@ -131,8 +138,11 @@ export function useAgentReorderAnimation(order: readonly string[]) {
 
   useEffect(
     () => () => {
-      observedRef.current?.observer.disconnect()
+      observedRef.current?.observer?.disconnect()
+      observedRef.current = null
       animationsRef.current.forEach((animation) => animation.cancel())
+      animationsRef.current = []
+      previousRef.current = null
     },
     []
   )

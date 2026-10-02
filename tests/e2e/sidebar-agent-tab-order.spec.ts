@@ -134,12 +134,15 @@ for (const mode of ['full', 'compact'] as const) {
       }
       initial.forEach((animation) => {
         animation.pause()
-        animation.currentTime = 90
-        // Keep playState running while preserving a deterministic halfway sample.
+        animation.currentTime = 20
+        // Keep playState running while preserving a deterministic early sample.
         animation.playbackRate = 0
         animation.play()
       })
       const before = nodes.map((node) => node.getBoundingClientRect().top)
+      const residuals = nodes.map((node) =>
+        Number.parseFloat(getComputedStyle(node).translate.split(' ')[1] ?? '0')
+      )
       store.getState().reorderUnifiedTabs(group.id, group.tabOrder)
       for (let i = 0; i < 10 && initial.some((animation) => animation.playState !== 'idle'); i++) {
         await frame()
@@ -157,8 +160,9 @@ for (const mode of ['full', 'compact'] as const) {
       })
       const after = nodes.map((node) => node.getBoundingClientRect().top)
       next.forEach((animation) => animation.finish())
-      return { before, after }
+      return { before, after, residuals }
     })
+    expect(Math.max(...interruption.residuals.map(Math.abs))).toBeGreaterThan(5)
     interruption.before.forEach((top, index) => {
       expect(Math.abs(top - interruption.after[index])).toBeLessThan(0.5)
     })
